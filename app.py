@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 import pandas as pd
 
+import plotly.graph_objects as go  # <-- ASEGÚRATE DE QUE ESTA LÍNEA ESTÉ AL INICIO
+
+
+
+
 # Configuración de la página
 st.set_page_config(page_title="Simulador Mecánico Universal", layout="wide")
 
@@ -212,23 +217,68 @@ if calcular:
         df_final_anim = pd.concat(df_frames, ignore_index=True)
         
         # Generar gráfico animador de Plotly
-        fig_plotly = px.scatter(
-            df_final_anim, 
-            x=x_col, 
-            y=y_col, 
-            animation_frame="Frame", 
-            color="Tipo",
-            color_discrete_map={'Estela': 'rgba(0, 128, 128, 0.25)', 'Partícula': 'red'},
-            range_x=[df[x_col].min() * 1.1 - 0.1, df[x_col].max() * 1.1 + 0.1],
-            range_y=[df[y_col].min() * 1.1 - 0.1, df[y_col].max() * 1.1 + 0.1],
-            labels={x_col: f"Posición {x_col}", y_col: f"Posición {y_col}"}
+        # === REEMPLAZA DESDE AQUÍ HASTA EL FINAL DE TU CÓDIGO ===
+        
+        # 1. Extraemos los vectores numéricos limpios del DataFrame
+        x_vals = df_anim[x_col].values
+        y_vals = df_anim[y_col].values
+        
+        # 2. Calculamos los límites de la pantalla para que no se mueva el gráfico
+        x_min, x_max = x_vals.min(), x_vals.max()
+        y_min, y_max = y_vals.min(), y_vals.max()
+        pad_x = (x_max - x_min) * 0.1 if x_max != x_min else 1.0
+        pad_y = (y_max - y_min) * 0.1 if y_max != y_min else 1.0
+
+        # 3. Creamos el nuevo gráfico configurado como línea fina continuas
+        fig_plotly = go.Figure(
+            data=[
+                # La estela ahora es una línea fina continua gracias a mode="lines"
+                go.Scatter(x=[], y=[], mode="lines", line=dict(color="rgba(0, 128, 128, 0.7)", width=1.5), name="Estela"),
+                # La masa que se mueve es un punto rojo
+                go.Scatter(x=[], y=[], mode="markers", marker=dict(color="red", size=10), name="Partícula")
+            ],
+            layout=go.Layout(
+                xaxis=dict(range=[x_min - pad_x, x_max + pad_x], title=f"Posición {x_col}"),
+                yaxis=dict(range=[y_min - pad_y, y_max + pad_y], title=f"Posición {y_col}"),
+                hovermode="closest",
+                height=550,
+                showlegend=False,
+                updatemenus=[{
+                    "type": "buttons",
+                    "buttons": [
+                        {
+                            "label": "▶ Play",
+                            "method": "animate",
+                            "args": [None, {"frame": {"duration": 30, "redraw": False}, "fromcurrent": True}]
+                        },
+                        {
+                            "label": "⏸ Pause",
+                            "method": "animate",
+                            "args": [[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate", "transition": {"duration": 0}}]
+                        }
+                    ]
+                }]
+            ),
+            frames=[
+                go.Frame(
+                    data=[
+                        # Aquí le ordenamos a la línea crecer uniendo todos los puntos anteriores
+                        go.Scatter(x=x_vals[:idx+1], y=y_vals[:idx+1]), 
+                        # Aquí posicionamos el punto rojo justo en la punta actual
+                        go.Scatter(x=[x_vals[idx]], y=[y_vals[idx]])    
+                    ],
+                    name=str(df_anim['Tiempo'].iloc[idx])
+                ) for idx in range(len(x_vals))
+            ]
         )
         
-        # Modificar el tamaño y estilo de la partícula vs la estela
-        fig_plotly.update_traces(marker=dict(size=8))
-        fig_plotly.update_layout(showlegend=False, height=550)
-        
+        # Desactivar configuraciones pesadas para que la animación vuele en el navegador
+        for frame in fig_plotly.frames:
+            frame.layout = go.Layout(sliders=[])
+
+        # Renderizar en la pantalla de Streamlit
         st.plotly_chart(fig_plotly, use_container_width=True)
+
 
     except Exception as e:
         st.error(f"Error en la simulación: {e}")
