@@ -2,7 +2,7 @@ import streamlit as st
 import sympy as sp
 import numpy as np
 import matplotlib.pyplot as plt
-import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 
 # Configuración de la página
@@ -10,7 +10,8 @@ st.set_page_config(page_title="Simulador Mecánico Universal", layout="wide")
 
 st.title("🎛️ Simulador Mecánico Universal con Animación")
 st.markdown("""
-Esta versión incluye un motor de animación optimizado con **trazos de línea fina** y un **controlador de velocidad** en la barra lateral.
+Esta aplicación calcula la dinámica de cualquier sistema de mecánica clásica **hasta 4 GDL**.
+Incluye la corrección exacta de signos físicos y una **animación interactiva con efecto trazo/órbita** en el espacio de configuración.
 """)
 
 # --- Entrada de datos en la barra lateral ---
@@ -62,12 +63,6 @@ with st.sidebar.form("lagrangian_form"):
 
     calcular = st.form_submit_button("Calcular y Resolver")
 
-# Control de velocidad de animación fuera del formulario para que sea dinámico
-st.sidebar.markdown("---")
-st.sidebar.subheader("🏃 Controles de la Animación")
-velocidad_sim = st.sidebar.slider("Velocidad de reproducción", min_value=1, max_value=10, value=3, help="Aumenta este valor para saltar pasos y acelerar la animación.")
-duracion_frame = st.sidebar.slider("Duración del Frame (ms)", min_value=10, max_value=200, value=30, help="Tiempo de espera en milisegundos entre cada cuadro.")
-
 if calcular:
     t = sp.Symbol('t')
     
@@ -84,6 +79,7 @@ if calcular:
         
     try:
         L = sp.parse_expr(lagr_input, local_dict=local_dict)
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -95,9 +91,12 @@ if calcular:
             dL_dq = L.diff(q[i])
             dL_ddq = L.diff(dq[i])
             d_dt_dL_ddq = dL_ddq.diff(t)
-            eqs.append(d_dt_dL_ddq - dL_dq)
+            
+            eq = d_dt_dL_ddq - dL_dq
+            eqs.append(eq)
             
         sym_ddq_temporal = [sp.Symbol(f'ddq_{i+1}') for i in range(gdl)]
+        
         eqs_algebraicas = []
         for eq in eqs:
             eq_temp = eq
@@ -106,22 +105,22 @@ if calcular:
             eqs_algebraicas.append(eq_temp)
             
         A_sym, B_sym = sp.linear_eq_to_matrix(eqs_algebraicas, sym_ddq_temporal)
-
-
-
-        # --- CÓDIGO CORREGIDO (Alrededor de la línea 105) ---
-        # Cambiamos M_num_expr por A_num_expr para que use la matriz lineal de SymPy
+        
+        A_num_expr = A_sym.subs(param_vals)
+        B_num_expr = B_sym.subs(param_vals)
+        
+        sym_q = [sp.Symbol(f'q{i+1}') for i in range(gdl)]
+        sym_dq = [sp.Symbol(f'dq{i+1}') for i in range(gdl)]
+        
         for i in range(gdl):
             for j in range(gdl):
                 A_num_expr = A_num_expr.subs(dq[j], sym_dq[j]).subs(q[j], sym_q[j])
                 B_num_expr = B_num_expr.subs(dq[j], sym_dq[j]).subs(q[j], sym_q[j])
                 
         func_A = sp.lambdify((*sym_q, *sym_dq), A_num_expr, 'numpy')
-        func_M = sp.lambdify((*sym_q, *sym_dq), A_num_expr, 'numpy') # <-- Cambiado M_num_expr por A_num_expr
         func_B = sp.lambdify((*sym_q, *sym_dq), B_num_expr, 'numpy')
 
-
-        # --- BUCLE DE INTEGRACIÓN ---
+        # --- BUCLE DE INTEGRACIÓN (SIGNO CORREGIDO) ---
         tiempos = np.arange(0, t_max, dt)
         n_pasos = len(tiempos)
         
@@ -136,10 +135,12 @@ if calcular:
             q_actual = historial_q[:, k]
             dq_actual = historial_dq[:, k]
             
-            M_eval = np.array(func_M(*q_actual, *dq_actual), dtype=float)
+            M_eval = np.array(func_A(*q_actual, *dq_actual), dtype=float)
             if gdl == 1: M_eval = np.array([[M_eval]])
+                
             F_eval = np.array(func_B(*q_actual, *dq_actual), dtype=float).flatten()
             
+            # Corrección de signo físico efectuada aquí (F_eval en lugar de -F_eval)
             try:
                 aceleraciones = np.linalg.solve(M_eval, F_eval)
             except np.linalg.LinAlgError:
@@ -153,24 +154,41 @@ if calcular:
             st.header(f"📊 Curvas de Evolución Temporal")
             fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
             for i in range(gdl):
-                ax.plot(tiempos, historial_q[i, :], label=f"q{i+1} (Posición)", lw=2)
-                ax.plot(tiempos, historial_dq[i, :], label=f"dq{i+1} (Velocidad)", linestyle="--", lw=1.5)
-            ax.set_ylabel("Posición")
-            ax.grid(True)
-            ax.legend()
-            ax.set_title("Coordenadas Generalizadas")
-            ax.set_xlabel("Tiempo (s)")
+                ax[0].plot(tiempos, historial_q[i, :], label=f"q{i+1} (Posición)", lw=2)
+                ax[1].plot(tiempos, historial_dq[i, :], label=f"dq{i+1} (Velocidad)", linestyle="--", lw=1.5)
+            
+            ax[0].set_ylabel("Posición")
+            ax[0].grid(True)
+            ax[0].legend()
+            ax[0].set_title("Coordenadas Generalizadas")
+            
+            ax[1].set_ylabel("Velocidad")
+            ax[1].set_xlabel("Tiempo (s)")
+            ax[1].grid(True)
+            ax[1].legend()
             st.pyplot(fig)
             
-        # --- SECCIÓN DE ANIMACIÓN OPTIMIZADA (go.Figure) ---
+        # --- SECCIÓN DE ANIMACIÓN (ÓRBITA / TRAZO) ---
         st.markdown("---")
         st.header("🌌 Órbita en el Espacio de Configuración Animada")
         
+        # Preparación de datos para Plotly
+        data_dict = {'Tiempo': tiempos}
+        for i in range(gdl):
+            data_dict[f'q{i+1}'] = historial_q[i, :]
+            data_dict[f'dq{i+1}'] = historial_dq[i, :]
+            
+        df = pd.DataFrame(data_dict)
+        
+        # Para que la animación corra fluida y no congelada, diezmamos los frames si hay demasiados pasos
+        max_frames = 150
+        step = max(1, n_pasos // max_frames)
+        df_anim = df.iloc[::step].copy()
+        
+        # Definición de ejes interactivos
         if gdl == 1:
             st.info("Mostrando Espacio de Fase (q1 vs dq1) debido a que el sistema tiene solo 1 GDL.")
-            x_vals = historial_q[0, :]
-            y_vals = historial_dq[0, :]
-            x_label, y_label = "Posición q1", "Velocidad dq1"
+            x_col, y_col = 'q1', 'dq1'
         else:
             col_sel1, col_sel2 = st.columns(2)
             opciones_q = [f"q{i+1}" for i in range(gdl)]
@@ -178,64 +196,39 @@ if calcular:
                 x_col = st.selectbox("Eje X (Órbita)", opciones_q, index=0)
             with col_sel2:
                 y_col = st.selectbox("Eje Y (Órbita)", opciones_q, index=1)
-            
-            x_vals = historial_q[int(x_col[-1]) - 1, :]
-            y_vals = historial_q[int(y_col[-1]) - 1, :]
-            x_label, y_label = f"Posición {x_col}", f"Posición {y_col}"
                 
-        # Aplicamos el multiplicador de velocidad (Salto de pasos)
-        indices_anim = np.arange(0, n_pasos, velocidad_sim)
-        if indices_anim[-1] != n_pasos - 1:
-            indices_anim = np.append(indices_anim, n_pasos - 1)
+        # Construimos las columnas acumulativas para el efecto "trazo/estela"
+        # Esto hace que se dibuje la línea completa detrás de la esfera viajera
+        df_frames = []
+        for i, t_actual in enumerate(df_anim['Tiempo']):
+            sub_df = df_anim[df_anim['Tiempo'] <= t_actual].copy()
+            sub_df['Frame'] = t_actual  # Identificador único de tiempo para el cuadro animado
+            # Marcamos cuál es la última fila del cuadro actual para dibujarla como la "esfera" de la órbita
+            sub_df['Tipo'] = 'Estela'
+            if len(sub_df) > 0:
+                sub_df.iloc[-1, sub_df.columns.get_loc('Tipo')] = 'Partícula'
+            df_frames.append(sub_df)
             
-        # Límites fijos de los ejes
-        x_min, x_max = x_vals.min(), x_vals.max()
-        y_min, y_max = y_vals.min(), y_vals.max()
-        pad_x = (x_max - x_min) * 0.1 if x_max != x_min else 1.0
-        pad_y = (y_max - y_min) * 0.1 if y_max != y_min else 1.0
-
-        # Crear base de la animación utilizando la API de objetos de Plotly (mucho más rápida)
-        fig_anim = go.Figure(
-            data=[
-                go.Scatter(x=[], y=[], mode="lines", line=dict(color="teal", width=1.5), name="Estela"), # Trazo fino
-                go.Scatter(x=[], y=[], mode="markers", marker=dict(color="red", size=10), name="Partícula") # Esfera principal
-            ],
-            layout=go.Layout(
-                xaxis=dict(range=[x_min - pad_x, x_max + pad_x], title=x_label),
-                yaxis=dict(range=[y_min - pad_y, y_max + pad_y], title=y_label),
-                hovermode="closest",
-                updatemenus=[{
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "label": "▶ Play",
-                            "method": "animate",
-                            "args": [None, {"frame": {"duration": duracion_frame, "redraw": False}, "fromcurrent": True}]
-                        },
-                        {
-                            "label": "⏸ Pause",
-                            "method": "animate",
-                            "args": [[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate", "transition": {"duration": 0}}]
-                        }
-                    ]
-                }]
-            ),
-            frames=[
-                go.Frame(
-                    data=[
-                        go.Scatter(x=x_vals[:idx+1], y=y_vals[:idx+1]), # La línea crece hasta el índice actual
-                        go.Scatter(x=[x_vals[idx]], y=[y_vals[idx]])    # El punto rojo se sitúa al extremo
-                    ],
-                    name=str(tiempos[idx])
-                ) for idx in indices_anim
-            ]
+        df_final_anim = pd.concat(df_frames, ignore_index=True)
+        
+        # Generar gráfico animador de Plotly
+        fig_plotly = px.scatter(
+            df_final_anim, 
+            x=x_col, 
+            y=y_col, 
+            animation_frame="Frame", 
+            color="Tipo",
+            color_discrete_map={'Estela': 'rgba(0, 128, 128, 0.25)', 'Partícula': 'red'},
+            range_x=[df[x_col].min() * 1.1 - 0.1, df[x_col].max() * 1.1 + 0.1],
+            range_y=[df[y_col].min() * 1.1 - 0.1, df[y_col].max() * 1.1 + 0.1],
+            labels={x_col: f"Posición {x_col}", y_col: f"Posición {y_col}"}
         )
         
-        # # Desactivar redibujado costoso en los frames
-        for frame in fig_anim.frames:
-            frame.layout = go.Layout(sliders=[])
-
-        st.plotly_chart(fig_anim, use_container_width=True)
+        # Modificar el tamaño y estilo de la partícula vs la estela
+        fig_plotly.update_traces(marker=dict(size=8))
+        fig_plotly.update_layout(showlegend=False, height=550)
+        
+        st.plotly_chart(fig_plotly, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error en la simulación: {e}")
