@@ -232,3 +232,4 @@ if calcular:
         )
         
         # Desactivar redibujado costoso en los frames
+for frame in fig_anim.frames:frame.layout = go.Layout(sliders=[])st.plotly_chart(fig_anim, use_container_width=True)except Exception as e:st.error(f"Error en la simulación: {e}")
