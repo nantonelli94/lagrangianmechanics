@@ -119,6 +119,7 @@ if calcular:
                 B_num_expr = B_num_expr.subs(dq[j], sym_dq[j]).subs(q[j], sym_q[j])
                 
         func_A = sp.lambdify((*sym_q, *sym_dq), A_num_expr, 'numpy')
+        func_M = sp.lambdify((*sym_q, *sym_dq), M_num_expr, 'numpy')  # <-- ¡AÑADE ESTA LÍNEA AQUÍ!
         func_B = sp.lambdify((*sym_q, *sym_dq), B_num_expr, 'numpy')
 
         # --- BUCLE DE INTEGRACIÓN ---
