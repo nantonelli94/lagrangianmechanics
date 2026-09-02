@@ -72,13 +72,10 @@ if calcular:
     q = [sp.Function(f'q{i+1}')(t) for i in range(gdl)]
     dq = [q[i].diff(t) for i in range(gdl)]
     ddq = [dq[i].diff(t) for i in range(gdl)]
-    
-    # Mapeo de texto ingresado a variables de SymPy
-    for i in range(gdl):
-        local_dict[f'q{i+1}'] = q[i]
-        local_dict[f'dq{i+1}'] = dq[i]
-        
+
+
     try:
+        # 1. Parsear la expresión de forma segura
         L = sp.parse_expr(lagr_input, local_dict=local_dict)
         
         col1, col2 = st.columns(2)
@@ -87,7 +84,7 @@ if calcular:
             st.header("🔬 Análisis Simbólico")
             st.latex(f"L = {sp.latex(L)}")
             
-        # Calcular Ecuaciones de Euler-Lagrange
+        # 2. Calcular Ecuaciones de Euler-Lagrange
         eqs = []
         for i in range(gdl):
             dL_dq = L.diff(q[i])
@@ -97,11 +94,15 @@ if calcular:
             eq = d_dt_dL_ddq - dL_dq
             eqs.append(eq)
             
-        # Despejar las aceleraciones (ddq)
+        # 3. Despejar las aceleraciones (ddq)
         aceleraciones = sp.solve(eqs, ddq)
         
+        # Validación en caso de sistemas altamente acoplados
+        if not aceleraciones:
+            raise ValueError("No se pudieron despejar analíticamente las aceleraciones. Revisa el acoplamiento de las velocidades.")
+
         with col1:
-            st.subheader("Ecuaciones del Movimiento (Euler-Lagrange)")
+            st.subheader("Ecuaciones del Movimiento")
             for i in range(gdl):
                 st.latex(f"\\frac{{d}}{{dt}}\\left(\\frac{{\\partial L}}{{\\partial \\dot{{q}}_{i+1}}}\\right) - \\frac{{\\partial L}}{{\\partial q_{i+1}}} = 0")
             
@@ -110,42 +111,44 @@ if calcular:
                 st.latex(f"\\ddot{{q}}_{i+1} = {sp.latex(aceleraciones[ddq[i]])}")
 
         # --- RESOLUCIÓN NUMÉRICA (SciPy) ---
-        # Reemplazar parámetros por sus valores numéricos en las expresiones de aceleración
+        # Sustituir primero los parámetros constantes por sus valores numéricos reales
         acel_num_expr = [aceleraciones[ddq[i]].subs(param_vals) for i in range(gdl)]
         
-        # Convertir variables simbólicas a argumentos numéricos planos para lambdify
+        # Variables ficticias planas para desvincular las funciones t de SymPy antes de lambdify
         sym_q = [sp.Symbol(f'q{i+1}') for i in range(gdl)]
         sym_dq = [sp.Symbol(f'dq{i+1}') for i in range(gdl)]
         
-        # Sustituir funciones del tiempo por símbolos planos para evaluar numéricamente de forma segura
+        # Sustitución explícita en orden inverso (velocidades primero, luego posiciones) para evitar colisiones
         for i in range(gdl):
-            acel_num_expr[i] = acel_num_expr[i].subs({dq[i]: sym_dq[i], q[i]: sym_q[i]})
+            for j in range(gdl):
+                acel_num_expr[i] = acel_num_expr[i].subs(dq[j], sym_dq[j])
+                acel_num_expr[i] = acel_num_expr[i].subs(q[j], sym_q[j])
             
-        # Crear funciones numéricas rápidas (lambdify)
-        # El orden de los argumentos para la función evaluadora será: (q1, ..., qN, dq1, ..., dqN)
+        # Generar funciones ejecutables por NumPy de forma segura
         acel_funcs = [sp.lambdify((*sym_q, *sym_dq), acel_num_expr[i], 'numpy') for i in range(gdl)]
         
-        # Definir el sistema de EDOs de primer orden para solve_ivp
+        # Definir el sistema de EDOs
         def sistema_dinamico(t_val, y):
-            # y contiene = [q1, ..., qN, dq1, ..., dqN]
             q_vals = y[:gdl]
             dq_vals = y[gdl:]
             
-            # Las derivadas de las posiciones son las velocidades
             dy_dt = list(dq_vals)
             
-            # Las derivadas de las velocidades son las aceleraciones evaluadas numéricamente
             for i in range(gdl):
+                # Forzar a que los argumentos se expandan correctamente en la tupla
                 acel = acel_funcs[i](*q_vals, *dq_vals)
-                dy_dt.append(acel)
+                # Si el resultado es una constante pura (ej: 0.0), convertir a float de Python para evitar errores con SciPy
+                if isinstance(acel, (np.ndarray, list)) and len(acel) == 1:
+                    acel = acel[0]
+                dy_dt.append(float(acel))
                 
             return dy_dt
 
-        # Vector de condiciones iniciales
+        # Vector de condiciones iniciales (CORREGIDO SIN VARIABLE ERRONEA)
         if gdl == 1:
             y0 = [q1_0, dq1_0]
         else:
-            y0 = [q1_0, q2_0, dq1_0, dq0_0 if 'dq0_0' in locals() else dq2_0]
+            y0 = [q1_0, q2_0, dq1_0, dq2_0]
             
         t_span = (0, t_max)
         t_eval = np.linspace(0, t_max, 1000)
@@ -153,40 +156,30 @@ if calcular:
         # Resolver EDO
         sol = solve_ivp(sistema_dinamico, t_span, y0, t_eval=t_eval, method='RK45')
         
-        # --- GRÁFICOS (Matplotlib / Streamlit) ---
+        # --- GRÁFICOS ---
         with col2:
             st.header("📊 Solución Numérica")
             
-            # Gráfico de Posiciones
             fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
             
+            # Posiciones
             for i in range(gdl):
-                ax[0].plot(sol.t, sol.y[i], label=f"q{i+1} (Posición)")
+                ax[0].plot(sol.t, sol.y[i], label=f"q{i+1} (Posición)", lw=2)
             ax[0].set_ylabel("Posición")
             ax[0].grid(True)
             ax[0].legend()
             ax[0].set_title("Evolución de las Coordenadas Generalizadas")
             
-            # Gráfico de Velocidades
+            # Velocidades
             for i in range(gdl):
-                ax[1].plot(sol.t, sol.y[gdl + i], label=f"dq{i+1} (Velocidad)", linestyle="--")
+                ax[1].plot(sol.t, sol.y[gdl + i], label=f"dq{i+1} (Velocidad)", linestyle="--", lw=2)
             ax[1].set_ylabel("Velocidad")
             ax[1].set_xlabel("Tiempo (s)")
             ax[1].grid(True)
             ax[1].legend()
             
             st.pyplot(fig)
-            
-            # Espacio de fase (si tiene 1 GDL)
-            if gdl == 1:
-                fig_fase, ax_fase = plt.subplots(figsize=(6, 4))
-                ax_fase.plot(sol.y[0], sol.y[1], color='purple')
-                ax_fase.set_title("Espacio de Fase")
-                ax_fase.set_xlabel("Posición (q1)")
-                ax_fase.set_ylabel("Velocidad (dq1)")
-                ax_fase.grid(True)
-                st.pyplot(fig_fase)
 
     except Exception as e:
         st.error(f"Error al procesar el Lagrangiano o resolver las ecuaciones: {e}")
-        st.info("Asegúrate de escribir la ecuación en formato Python matemático correcto. Ej: `0.5 * m * dq1**2` y usar las variables indicadas.")
+
