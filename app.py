@@ -106,21 +106,20 @@ if calcular:
             eqs_algebraicas.append(eq_temp)
             
         A_sym, B_sym = sp.linear_eq_to_matrix(eqs_algebraicas, sym_ddq_temporal)
-        
-        A_num_expr = A_sym.subs(param_vals)
-        B_num_expr = B_sym.subs(param_vals)
-        
-        sym_q = [sp.Symbol(f'q{i+1}') for i in range(gdl)]
-        sym_dq = [sp.Symbol(f'dq{i+1}') for i in range(gdl)]
-        
+
+
+
+        # --- CÓDIGO CORREGIDO (Alrededor de la línea 105) ---
+        # Cambiamos M_num_expr por A_num_expr para que use la matriz lineal de SymPy
         for i in range(gdl):
             for j in range(gdl):
                 A_num_expr = A_num_expr.subs(dq[j], sym_dq[j]).subs(q[j], sym_q[j])
                 B_num_expr = B_num_expr.subs(dq[j], sym_dq[j]).subs(q[j], sym_q[j])
                 
         func_A = sp.lambdify((*sym_q, *sym_dq), A_num_expr, 'numpy')
-        func_M = sp.lambdify((*sym_q, *sym_dq), M_num_expr, 'numpy')  # <-- ¡AÑADE ESTA LÍNEA AQUÍ!
+        func_M = sp.lambdify((*sym_q, *sym_dq), A_num_expr, 'numpy') # <-- Cambiado M_num_expr por A_num_expr
         func_B = sp.lambdify((*sym_q, *sym_dq), B_num_expr, 'numpy')
+
 
         # --- BUCLE DE INTEGRACIÓN ---
         tiempos = np.arange(0, t_max, dt)
