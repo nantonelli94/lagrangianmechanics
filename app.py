@@ -157,9 +157,9 @@ if calcular:
             
             # Como A * ddq + B = 0 -> M_eval * aceleraciones = -F_eval
             try:
-                aceleraciones = np.linalg.solve(M_eval, -F_eval)
+                aceleraciones = np.linalg.solve(M_eval, F_eval)
             except np.linalg.LinAlgError:
-                aceleraciones = np.linalg.pinv(M_eval).dot(-F_eval)
+                aceleraciones = np.linalg.pinv(M_eval).dot(F_eval)
             
             # Integrador simpléctico de Euler-Cromer
             historial_dq[:, k+1] = dq_actual + aceleraciones * dt
